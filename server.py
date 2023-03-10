@@ -8,6 +8,8 @@ import threading
 from utils.firebase.admin import firebase_app
 from utils.landmark_detection import extract_landmarks
 from utils.firebase.file_upload import file_upload
+from firebase_admin import firestore
+import datetime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('HELLO WORLD')
@@ -18,6 +20,7 @@ CORS(app, support_credentials=True)
 
 UPLOAD_FOLDER = './static/uploads/'
 OUTPUT_FOLDER = './static/landmarks/'
+root = os.path.abspath(os.curdir)
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -27,7 +30,7 @@ def hello_world():
 
 
 @app.route("/contribute", methods=['POST', 'GET'])
-def detect_landmark():
+def contribute():
     target = os.path.join(UPLOAD_FOLDER, '.')
     landmark_output = os.path.join(OUTPUT_FOLDER, '.')
     file = request.files['file']
@@ -35,19 +38,51 @@ def detect_landmark():
     contributor_name = request.form.get("contributor_name")
     contributor_email = request.form.get("contributor_email")
     filename = request.form.get('name')
-    destination = "/".join([target, filename+".mp4"])
-    # print(type(filename))
-    file.save(destination)
+    print(label)
+    print(contributor_email)
+    print(contributor_name)
+    db = firestore.client()
+    data = {
+        u'contributor': contributor_name,
+        u'email': contributor_email,
+        u'label': label,
+        u'date': datetime.datetime.now().strftime("%d/%m/%Y")
+    }
+    update_time, data_ref = db.collection(u'collections').add(data)
+
+    filename = data_ref.id
+
+    data_path = "/".join([target, filename+".mp4"])
+
+    data_name = os.path.join("collections", label, str(filename)+".mp4")
     landmark_file_path = os.path.join(
-        "/home/zhalok/Desktop/Projects/BangNet/BangNet-Backend/static/landmarks", str(filename)+".pkl")
-    landmark_file_blob = os.path.join("landmarks", label, filename+".pkl")
-    landmark_video_blob = os.path.join("landmarks", label, filename+".avi")
-    landmark_video_file = os.path.join(
-        "/home/zhalok/Desktop/Projects/BangNet/BangNet-Backend/landmark_clips", str(filename)+".avi")
-    extract_landmarks(destination, landmark_video_file, landmark_file_path)
+        root + "/static/landmarks", str(filename)+".pkl")
+    landmark_file_blob = os.path.join(
+        "landmarks", label, filename+".pkl")
+    landmark_video_blob = os.path.join(
+        "landmark_videos", label, filename+".mp4")
+    landmark_video_path = os.path.join(
+        root + "/landmark_clips", str(filename)+".mp4")
+
+    file.save(data_path)
+    extract_landmarks(data_path, landmark_video_path, landmark_file_path)
+    print("Uploading landmarks")
     file_url = file_upload(landmark_file_blob, landmark_file_path)
-    video_url = file_upload(landmark_video_blob, landmark_video_file)
+    print("uploading landmark video")
+    video_url = file_upload(landmark_video_blob, landmark_video_path)
+    print("Uploading collections")
+    data_url = file_upload(data_name, data_path)
+    print("Upload successful")
 
-#  detect_landmark()
+    if os.path.exists(data_path):
+        os.remove(data_path)
+    if os.path.exists(landmark_file_path):
+        os.remove(landmark_file_path)
+    if os.path.exists(landmark_video_path):
+        os.remove(landmark_video_path)
+    data["landmark"] = file_url
+    data["landmark_video"] = video_url
+    data["clip"] = data_url
+    db.collection(u'collections').document(filename).set(data)
+    return data
 
-    return {"file": file_url, "video": video_url}
